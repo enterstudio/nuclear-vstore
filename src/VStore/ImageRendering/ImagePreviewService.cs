@@ -180,9 +180,9 @@ namespace NuClear.VStore.ImageRendering
                 var blueRight = GetMeanColorValue(image.Height, (intervalCount, index) => GetImagePixelColorOnRight(image, intervalCount, index).B);
 
                 backgroundColor = new Rgba32(
-                    0.25f * redTop * redBottom * redLeft * redRight,
-                    0.25f * greenTop * greenBottom * greenLeft * greenRight,
-                    0.25f * blueTop * blueBottom * blueLeft * blueRight);
+                    0.25f * (redTop + redBottom + redLeft + redRight),
+                    0.25f * (greenTop + greenBottom + greenLeft + greenRight),
+                    0.25f * (blueTop + blueBottom + blueLeft + blueRight));
             }
 
             var unionRectangle = Rectangle.Union(imageRectangle, cropAreaRectangle);
