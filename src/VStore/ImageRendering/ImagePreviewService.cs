@@ -180,9 +180,9 @@ namespace NuClear.VStore.ImageRendering
                 var blueRight = GetMeanColorValue(image.Height, (intervalCount, index) => GetImagePixelColorOnRight(image, intervalCount, index).B);
 
                 backgroundColor = new Rgba32(
-                    0.25f * (redTop + redBottom + redLeft + redRight),
-                    0.25f * (greenTop + greenBottom + greenLeft + greenRight),
-                    0.25f * (blueTop + blueBottom + blueLeft + blueRight));
+                    (byte)((redTop + redBottom + redLeft + redRight) / 4),
+                    (byte)((greenTop + greenBottom + greenLeft + greenRight) / 4),
+                    (byte)((blueTop + blueBottom + blueLeft + blueRight) / 4));
             }
 
             var unionRectangle = Rectangle.Union(imageRectangle, cropAreaRectangle);
@@ -238,7 +238,7 @@ namespace NuClear.VStore.ImageRendering
         }
 
         // Based on Simpson's rule
-        private static int GetMeanColorValue(int dimension, Func<int, int, int> getPixelColor)
+        private static byte GetMeanColorValue(int dimension, Func<int, int, byte> getPixelColor)
         {
             var intervalCount = dimension / 4;
 
@@ -255,7 +255,7 @@ namespace NuClear.VStore.ImageRendering
             }
 
             var sum = getPixelColor(intervalCount, 0) + 4 * value1 + 2 * value2 + getPixelColor(intervalCount, 2 * intervalCount);
-            return (int)(sum / (float)intervalCount / 6f);
+            return (byte)(sum / (float)intervalCount / 6f);
         }
 
         private static Rgb24 GetImagePixelColorOnTop(Image<Rgba32> image, int intervalCount, int index)
