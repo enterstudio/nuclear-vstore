@@ -20,18 +20,12 @@ namespace NuClear.VStore.Descriptors
 
         public override bool Equals(object obj)
         {
-            var other = obj as VersionedObjectDescriptor<TId>;
-            if (other == null)
+            if (!(obj is VersionedObjectDescriptor<TId> other))
             {
                 return false;
             }
 
-            if (ReferenceEquals(this, other))
-            {
-                return true;
-            }
-
-            return Equals(other);
+            return ReferenceEquals(this, other) || Equals(other);
         }
 
         public bool Equals(VersionedObjectDescriptor<TId> other) =>

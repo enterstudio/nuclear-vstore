@@ -128,6 +128,27 @@ namespace NuClear.VStore.Host.Controllers
             }
         }
 
+        [HttpGet("{id:long}/versions")]
+        [ProducesResponseType(typeof(IReadOnlyCollection<TemplateVersionRecord>), 200)]
+        [ProducesResponseType(404)]
+        [ProducesResponseType(503)]
+        public async Task<IActionResult> GetVersions(long id)
+        {
+            try
+            {
+                var versions = await _templatesStorageReader.GetTemplateVersions(id, null);
+                return Json(versions);
+            }
+            catch (ObjectNotFoundException)
+            {
+                return NotFound();
+            }
+            catch (LockAlreadyExistsException)
+            {
+                return ServiceUnavailable("Simultaneous template versions listing and its creation/modification");
+            }
+        }
+
         [Obsolete, MapToApiVersion("1.0")]
         [HttpPost("validate-elements")]
         [ProducesResponseType(200)]

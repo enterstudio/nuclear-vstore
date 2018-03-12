@@ -197,7 +197,7 @@ namespace NuClear.VStore.Objects
                     descriptor.VersionId,
                     --maxVersionIndex,
                     descriptor.LastModified,
-                    new AuthorInfo(descriptor.Metadata.Author, descriptor.Metadata.AuthorLogin, descriptor.Metadata.AuthorLogin),
+                    new AuthorInfo(descriptor.Metadata.Author, descriptor.Metadata.AuthorLogin, descriptor.Metadata.AuthorName),
                     descriptor.Properties,
                     descriptor.Elements.Select(x => new ObjectVersionRecord.ElementRecord(x.TemplateCode, x.Value)).ToList(),
                     descriptor.Metadata.ModifiedElements);

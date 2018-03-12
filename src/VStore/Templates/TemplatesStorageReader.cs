@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,6 +17,7 @@ using Newtonsoft.Json;
 using NuClear.VStore.DataContract;
 using NuClear.VStore.Descriptors.Templates;
 using NuClear.VStore.Json;
+using NuClear.VStore.Locks;
 using NuClear.VStore.Options;
 using NuClear.VStore.S3;
 
@@ -25,13 +27,15 @@ namespace NuClear.VStore.Templates
     {
         private readonly IS3Client _s3Client;
         private readonly IMemoryCache _memoryCache;
+        private readonly DistributedLockManager _distributedLockManager;
         private readonly string _bucketName;
         private readonly int _degreeOfParallelism;
 
-        public TemplatesStorageReader(CephOptions cephOptions, IS3Client s3Client, IMemoryCache memoryCache)
+        public TemplatesStorageReader(CephOptions cephOptions, IS3Client s3Client, IMemoryCache memoryCache, DistributedLockManager distributedLockManager)
         {
             _s3Client = s3Client;
             _memoryCache = memoryCache;
+            _distributedLockManager = distributedLockManager;
             _bucketName = cephOptions.TemplatesBucketName;
             _degreeOfParallelism = cephOptions.DegreeOfParallelism;
         }
@@ -161,6 +165,97 @@ namespace NuClear.VStore.Templates
                                            Prefix = idAsString
                                        });
             return listResponse.S3Objects.FindIndex(o => o.Key == idAsString) != -1;
+        }
+
+        public async Task<IReadOnlyCollection<TemplateVersionRecord>> GetTemplateVersions(long id, string initialVersionId)
+        {
+            var idAsString = id.ToString();
+            var templateDescriptors = new List<TemplateDescriptor>();
+
+            async Task<(bool IsTruncated, int NextVersionIndex, string NextVersionIdMarker)> ListVersions(int nextVersionIndex, string nextVersionIdMarker)
+            {
+                await _distributedLockManager.EnsureLockNotExistsAsync(id);
+
+                var response = await _s3Client.ListVersionsAsync(
+                                   new ListVersionsRequest
+                                       {
+                                           BucketName = _bucketName,
+                                           Prefix = idAsString,
+                                           VersionIdMarker = nextVersionIdMarker
+                                       });
+
+                var nonDeletedVersions = response.Versions.FindAll(x => !x.IsDeleteMarker && x.Key == idAsString);
+                nextVersionIndex += nonDeletedVersions.Count;
+
+                var initialVersionIdReached = false;
+                var versionInfos = nonDeletedVersions
+                    .Aggregate(
+                        new List<(string VersionId, DateTime LastModified)>(),
+                        (list, next) =>
+                            {
+                                initialVersionIdReached = initialVersionIdReached ||
+                                                          !string.IsNullOrEmpty(initialVersionId) &&
+                                                          initialVersionId.Equals(next.VersionId, StringComparison.OrdinalIgnoreCase);
+                                if (!initialVersionIdReached)
+                                {
+                                    list.Add((next.VersionId, next.LastModified));
+                                }
+
+                                return list;
+                            });
+
+                var descriptors = new TemplateDescriptor[versionInfos.Count];
+                var partitioner = Partitioner.Create(versionInfos);
+                var tasks = partitioner.GetOrderablePartitions(_degreeOfParallelism)
+                                       .Select(async partition =>
+                                                   {
+                                                       while (partition.MoveNext())
+                                                       {
+                                                           var index = partition.Current.Key;
+                                                           var (versionId, _) = partition.Current.Value;
+
+                                                           descriptors[index] = await GetTemplateDescriptor(id, versionId);
+                                                       }
+                                                   });
+                await Task.WhenAll(tasks);
+
+                templateDescriptors.AddRange(descriptors);
+
+                return (!initialVersionIdReached && response.IsTruncated, nextVersionIndex, response.NextVersionIdMarker);
+            }
+
+            var result = await ListVersions(0, null);
+            if (templateDescriptors.Count == 0)
+            {
+                if (!await IsTemplateExists(id))
+                {
+                    throw new ObjectNotFoundException($"Template '{id}' not found.");
+                }
+
+                return Array.Empty<TemplateVersionRecord>();
+            }
+
+            while (result.IsTruncated)
+            {
+                result = await ListVersions(result.NextVersionIndex, result.NextVersionIdMarker);
+            }
+
+            var maxVersionIndex = result.NextVersionIndex;
+            var records = new TemplateVersionRecord[templateDescriptors.Count];
+            for (var index = 0; index < templateDescriptors.Count; ++index)
+            {
+                var descriptor = templateDescriptors[index];
+                records[index] = new TemplateVersionRecord(
+                    descriptor.Id,
+                    descriptor.VersionId,
+                    --maxVersionIndex,
+                    descriptor.LastModified,
+                    new AuthorInfo(descriptor.Author, descriptor.AuthorLogin, descriptor.AuthorName),
+                    descriptor.Properties,
+                    descriptor.Elements.Select(x => x.TemplateCode).ToList());
+            }
+
+            return records;
         }
     }
 }
